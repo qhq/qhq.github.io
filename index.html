@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>考勤管理系统</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 适配 iOS Safari 日期控件外观 */
+        input[type="date"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background-color: #ffffff;
+            min-height: 38px;
+            min-width: 130px;
+            box-sizing: border-box;
+        }
+        /* 美化自定义横向滚动条 */
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen p-4 sm:p-6">
+    <div class="max-w-4xl mx-auto space-y-6">
+        
+        <!-- 头部看板 -->
+        <header class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100 space-y-4">
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                    <span>🌴</span> 个人考勤管理
+                </h1>
+            </div>
+
+            <!-- 即将过期加班警告条（31天以内，最多展示3条） -->
+            <div id="expiryWarningCard" class="bg-emerald-50 p-3.5 rounded-xl border border-emerald-100 flex flex-col gap-1">
+                <div class="text-xs font-medium text-emerald-800" id="earliestExpiryText">✨ 无近期加班过期风险</div>
+            </div>
+
+            <!-- 核心数据指标看板 -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <!-- 1. 当前调休余额 -->
+                <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col justify-between">
+                    <div class="text-xs text-indigo-600 font-medium">当前调休余额</div>
+                    <div class="text-2xl font-bold text-indigo-900 mt-2" id="totalBalance">0.0 <span class="text-sm font-normal">天</span></div>
+                </div>
+
+                <!-- 2. 累计加班 / 调休组合卡片 -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-between space-y-2">
+                    <div class="text-xs text-slate-500 font-medium">累计加班 / 累计调休</div>
+                    <div class="flex items-baseline justify-between mt-1">
+                        <div>
+                            <span class="text-xs text-slate-400">加班:</span>
+                            <span class="text-lg font-bold text-emerald-700 ml-1" id="yearOtTotal">0.0 天</span>
+                        </div>
+                        <div class="text-slate-300">|</div>
+                        <div>
+                            <span class="text-xs text-slate-400">调休:</span>
+                            <span class="text-lg font-bold text-purple-700 ml-1" id="totalLeaveUsed">0.0 天</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 最近加班 / 调休组合卡片 -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-between space-y-2">
+                    <div class="text-xs text-slate-500 font-medium">最近记录（加班 / 调休）</div>
+                    <div class="flex items-baseline justify-between mt-1">
+                        <div class="truncate">
+                            <span class="text-xs text-slate-400">加:</span>
+                            <span class="text-xs font-semibold text-emerald-900 ml-1" id="lastOtText">无记录</span>
+                        </div>
+                        <div class="text-slate-300">|</div>
+                        <div class="truncate">
+                            <span class="text-xs text-slate-400">调:</span>
+                            <span class="text-xs font-semibold text-purple-900 ml-1" id="lastLeaveText">无记录</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 考勤热图展示区 -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100 space-y-3">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <h2 class="text-base font-semibold text-slate-900 flex items-center gap-2 shrink-0">
+                    <span>🟩 考勤日历热图</span>
+                    <span class="text-xs font-normal text-slate-400">(近1年，点击方格查看详情)</span>
+                </h2>
+                <div class="flex items-center gap-1.5 text-[10px] text-slate-400 self-end sm:self-auto shrink-0">
+                    <span>少</span>
+                    <span class="w-2.5 h-2.5 bg-slate-100 rounded-sm inline-block"></span>
+                    <span class="w-2.5 h-2.5 bg-emerald-200 rounded-sm inline-block"></span>
+                    <span class="w-2.5 h-2.5 bg-emerald-400 rounded-sm inline-block"></span>
+                    <span class="w-2.5 h-2.5 bg-emerald-600 rounded-sm inline-block"></span>
+                    <span class="w-2.5 h-2.5 bg-purple-500 rounded-sm inline-block" title="调休"></span>
+                    <span>多</span>
+                </div>
+            </div>
+            
+            <div id="heatmapContainer" class="flex gap-1 overflow-x-auto pb-2 custom-scrollbar w-full min-h-[90px]">
+                <!-- 动态填充 -->
+            </div>
+
+            <div id="heatmapDetail" class="hidden p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-600 transition">
+                <!-- 动态填充 -->
+            </div>
+        </div>
+
+        <!-- 登记表单 -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100 space-y-4">
+            <h2 class="text-lg font-semibold text-slate-900">✍️ 登记考勤（加班 / 调休）</h2>
+            
+            <div class="flex bg-slate-100 p-1 rounded-xl gap-1 text-sm font-medium">
+                <button type="button" onclick="setFormType('ot')" id="btnFormOt" class="flex-1 py-2 rounded-lg text-center transition bg-white text-emerald-600 shadow-sm font-semibold">
+                    🟢 登记加班
+                </button>
+                <button type="button" onclick="setFormType('leave')" id="btnFormLeave" class="flex-1 py-2 rounded-lg text-center transition text-slate-500 hover:text-slate-800">
+                    🟣 登记调休
+                </button>
+            </div>
+
+            <form id="unifiedForm" onsubmit="handleFormSubmit(event)" class="space-y-4 pt-1">
+                <input type="hidden" id="entryType" value="ot">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">开始日期</label>
+                        <input type="date" id="formStartDate" onchange="updateCalc('form', 'start')" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">结束日期</label>
+                        <input type="date" id="formEndDate" onchange="updateCalc('form', 'end')" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                </div>
+
+                <div id="formPeriodContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+
+                <div class="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs text-slate-600">
+                    <span>合计核算：</span>
+                    <span class="font-bold text-emerald-600 text-sm" id="formCalcSummary">1.0 天 (8小时)</span>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">事由 / 备注</label>
+                    <input type="text" id="formReason" placeholder="例如：项目赶进度 / 陪同休假" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <button type="submit" id="formSubmitBtn" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl text-sm transition">
+                    提交加班记录
+                </button>
+            </form>
+        </div>
+
+        <!-- 历史明细区 -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-100 space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h2 class="text-lg font-semibold text-slate-900">📋 历史记录与关联明细</h2>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span>筛选范围：</span>
+                    <input type="date" id="filterStart" onchange="render()" class="px-2 py-1 border border-slate-200 rounded-lg">
+                    <span>至</span>
+                    <input type="date" id="filterEnd" onchange="render()" class="px-2 py-1 border border-slate-200 rounded-lg">
+                    <button onclick="resetFilter()" class="text-indigo-600 hover:underline">重置</button>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 gap-3 pb-2">
+                <div class="flex gap-6 text-sm font-medium">
+                    <button onclick="switchTab('leave')" id="tabLeaveBtn" class="pb-2 border-b-2 border-indigo-600 text-indigo-600 transition">调休记录</button>
+                    <button onclick="switchTab('ot')" id="tabOtBtn" class="pb-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition">加班明细账本</button>
+                </div>
+                <div class="flex items-center gap-3 text-xs">
+                    <button onclick="toggleSortOrder()" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition" id="sortOrderBtn">排序: 最近在上 ▼</button>
+                    <button onclick="batchDelete()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-medium rounded-lg transition">批量删除选中</button>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 text-xs text-slate-500 pt-1">
+                <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)" class="rounded border-slate-300">
+                <label for="selectAllCheckbox" class="cursor-pointer">全选当前列表</label>
+            </div>
+            <div id="recordList" class="divide-y divide-slate-100 overflow-x-auto">
+                <!-- 动态填充 -->
+            </div>
+        </div>
+
+        <!-- 底部功能按钮区（专门适配 iOS / Koder 导出机制） -->
+        <div class="bg-white rounded-2xl shadow-sm p-4 border border-slate-100 flex flex-wrap justify-end items-center gap-3">
+            <button onclick="smartBatchClear()" class="px-3 py-2 text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl transition">清理记录</button>
+            <button onclick="exportData()" class="px-3 py-2 text-xs font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition">导出数据备份</button>
+            <label class="px-3 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer">
+                导入数据恢复 <input type="file" id="importFile" class="hidden" onchange="importData(event)">
+            </label>
+        </div>
+
+    </div>
+
+    <!-- 针对移动端/Koder无法直接下载的“备份文本复制弹窗” -->
+    <div id="exportModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-900">📦 备份数据导出</h3>
+                <button onclick="closeExportModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕ 关闭</button>
+            </div>
+            <p class="text-xs text-slate-500">如果无法下载文件，请点击下方按钮复制全部备份 JSON 文本，粘贴保存到本地文件中。</p>
+            <textarea id="exportTextarea" readonly class="w-full h-40 p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"></textarea>
+            <div class="flex gap-3">
+                <button onclick="copyExportText()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition">一键复制备份文本</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 修改弹窗 -->
+    <div id="editModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <h3 class="text-lg font-bold text-slate-900" id="editModalTitle">修改记录</h3>
+            <form id="editForm" onsubmit="saveEdit(event)" class="space-y-4">
+                <input type="hidden" id="editId">
+                <input type="hidden" id="editType">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">开始日期</label>
+                        <input type="date" id="editStartDate" onchange="updateCalc('edit', 'start')" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">结束日期</label>
+                        <input type="date" id="editEndDate" onchange="updateCalc('edit', 'end')" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <div id="editPeriodContainer" class="grid grid-cols-2 gap-3"></div>
+
+                <div class="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs text-slate-600">
+                    <span>修改后合计：</span>
+                    <span class="font-bold text-indigo-600 text-sm" id="editCalcSummary">1.0 天</span>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">事由 / 备注</label>
+                    <input type="text" id="editReason" required class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="closeEditModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-sm transition">取消</button>
+                    <button type="submit" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition">保存修改</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let db = JSON.parse(localStorage.getItem('leave_system_db')) || { overtimes: [], leaves: [] };
+        let currentTab = 'leave';
+        let sortDesc = true;
+
+        window.onload = function() {
+            migrateOldData();
+            const todayStr = new Date().toISOString().split('T')[0];
+            const formStartDate = document.getElementById('formStartDate');
+            const formEndDate = document.getElementById('formEndDate');
+            if (formStartDate) formStartDate.value = todayStr;
+            if (formEndDate) formEndDate.value = todayStr;
+            
+            updateCalc('form');
+            recalculateFIFO();
+            render();
+        }
+
+        function migrateOldData() {
+            let modified = false;
+            if (db.overtimes) {
+                db.overtimes.forEach(ot => {
+                    if (!ot.startDate && ot.date) { ot.startDate = ot.date; ot.endDate = ot.date; modified = true; }
+                    if (!ot.sPeriod) { ot.sPeriod = 'full'; ot.ePeriod = 'full'; modified = true; }
+                    if (!ot.hours && ot.days) { ot.hours = ot.days * 8; modified = true; }
+                });
+            }
+            if (db.leaves) {
+                db.leaves.forEach(l => {
+                    if (!l.startDate && l.date) { l.startDate = l.date; l.endDate = l.date; modified = true; }
+                    if (!l.sPeriod) { l.sPeriod = 'full'; l.ePeriod = 'full'; modified = true; }
+                    if (!l.hours && l.days) { l.hours = l.days * 8; modified = true; }
+                });
+            }
+            if (modified) localStorage.setItem('leave_system_db', JSON.stringify(db));
+        }
+
+        function setFormType(type) {
+            document.getElementById('entryType').value = type;
+            const btnOt = document.getElementById('btnFormOt');
+            const btnLeave = document.getElementById('btnFormLeave');
+            const submitBtn = document.getElementById('formSubmitBtn');
+
+            if (type === 'ot') {
+                btnOt.className = "flex-1 py-2 rounded-lg text-center transition bg-white text-emerald-600 shadow-sm font-semibold";
+                btnLeave.className = "flex-1 py-2 rounded-lg text-center transition text-slate-500 hover:text-slate-800";
+                submitBtn.className = "w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl text-sm transition";
+                submitBtn.innerText = "提交加班记录";
+            } else {
+                btnLeave.className = "flex-1 py-2 rounded-lg text-center transition bg-white text-indigo-600 shadow-sm font-semibold";
+                btnOt.className = "flex-1 py-2 rounded-lg text-center transition text-slate-500 hover:text-slate-800";
+                submitBtn.className = "w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition";
+                submitBtn.innerText = "提交调休记录";
+            }
+            updateCalc('form');
+        }
+
+        function calculateDaysAndHours(startDateStr, endDateStr, startPeriod, endPeriod) {
+            if (!startDateStr || !endDateStr) return { days: 0, hours: 0, text: '0 天' };
+            let d1 = new Date(startDateStr);
+            let d2 = new Date(endDateStr);
+            if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 < d1) return { days: 0, hours: 0, text: '日期有误' };
+
+            let diffDays = Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+            if (diffDays === 0) {
+                if (startPeriod === 'full') return { days: 1.0, hours: 8, text: '1.0 天 (8小时)' };
+                if (startPeriod === 'morning' || startPeriod === 'afternoon') return { days: 0.5, hours: 4, text: '0.5 天 (4小时)' };
+            } else {
+                let startVal = (startPeriod === 'afternoon') ? 0.5 : 1.0; 
+                let endVal = (endPeriod === 'morning') ? 0.5 : 1.0;       
+                let middleDays = Math.max(0, diffDays - 1);               
+                let totalDays = startVal + endVal + middleDays;
+                return { days: totalDays, hours: totalDays * 8, text: `${totalDays} 天 (${totalDays * 8}小时)` };
+            }
+            return { days: 1.0, hours: 8, text: '1.0 天 (8小时)' };
+        }
+
+        function updateCalc(type, changedField) {
+            let startEl = document.getElementById(type + 'StartDate');
+            let endEl = document.getElementById(type + 'EndDate');
+            let container = document.getElementById(type + 'PeriodContainer');
+            let summaryEl = document.getElementById(type + 'CalcSummary');
+
+            if (!startEl || !endEl || !container) return;
+
+            if (startEl.value && endEl.value) {
+                if (changedField === 'end' && endEl.value < startEl.value) {
+                    startEl.value = endEl.value;
+                } else if (changedField === 'start' && startEl.value > endEl.value) {
+                    endEl.value = startEl.value;
+                } else if (!changedField) {
+                    if (endEl.value < startEl.value) startEl.value = endEl.value;
+                }
+            }
+
+            let isSameDay = (startEl.value === endEl.value);
+            let oldStartVal = document.getElementById(type + 'StartPeriod') ? document.getElementById(type + 'StartPeriod').value : 'full';
+
+            if (isSameDay) {
+                container.innerHTML = `
+                    <div class="col-span-2">
+                        <label class="block text-xs font-medium text-slate-600 mb-1">时段选择</label>
+                        <select id="${type}StartPeriod" onchange="updateCalc('${type}')" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                            <option value="full">全天 (1天)</option>
+                            <option value="morning">上午 (0.5天)</option>
+                            <option value="afternoon">下午 (0.5天)</option>
+                        </select>
+                    </div>
+                `;
+                let el = document.getElementById(type + 'StartPeriod');
+                if(el && ['full', 'morning', 'afternoon'].includes(oldStartVal)) el.value = oldStartVal;
+            } else {
+                container.innerHTML = `
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">首日开始时段</label>
+                        <select id="${type}StartPeriod" onchange="updateCalc('${type}')" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                            <option value="full">首日全天</option>
+                            <option value="afternoon">首日下午开始 (0.5天)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">尾日结束时段</label>
+                        <select id="${type}EndPeriod" onchange="updateCalc('${type}')" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                            <option value="full">尾日全天</option>
+                            <option value="morning">尾日上午截至 (0.5天)</option>
+                        </select>
+                    </div>
+                `;
+            }
+
+            let sPeriod = document.getElementById(type + 'StartPeriod') ? document.getElementById(type + 'StartPeriod').value : 'full';
+            let ePeriod = document.getElementById(type + 'EndPeriod') ? document.getElementById(type + 'EndPeriod').value : 'full';
+            let result = calculateDaysAndHours(startEl.value, endEl.value, sPeriod, ePeriod);
+            if(summaryEl) summaryEl.innerText = result.text;
+        }
+
+        function checkConflict(type, startDate, endDate, sPeriod, ePeriod, excludeId = null) {
+            let list = (type === 'ot') ? db.overtimes : db.leaves;
+            for (let item of list) {
+                if (excludeId && item.id === excludeId) continue;
+                let iStart = item.startDate || item.date;
+                let iEnd = item.endDate || item.date;
+                let iSp = item.sPeriod || 'full';
+
+                if (!(endDate < iStart || startDate > iEnd)) {
+                    if (startDate === endDate && iStart === iEnd && startDate === iStart) {
+                        if (sPeriod === iSp || sPeriod === 'full' || iSp === 'full') return item;
+                    } else {
+                        return item;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function recalculateFIFO() {
+            db.overtimes.sort((a, b) => new Date(a.startDate || a.date) - new Date(b.startDate || b.date));
+            db.overtimes.forEach(ot => ot.usedHours = 0);
+            db.leaves.sort((a, b) => new Date(a.startDate || a.date) - new Date(b.startDate || b.date));
+
+            db.leaves.forEach(leave => {
+                let remainingToDeduct = leave.hours || (leave.days * 8);
+                leave.deductions = [];
+
+                let availableOts = db.overtimes.filter(ot => (ot.hours - (ot.usedHours || 0)) > 0);
+
+                for (let ot of availableOts) {
+                    if (remainingToDeduct <= 0) break;
+                    let availableInThisOt = ot.hours - (ot.usedHours || 0);
+                    let deductNow = Math.min(remainingToDeduct, availableInThisOt);
+
+                    ot.usedHours = (ot.usedHours || 0) + deductNow;
+                    remainingToDeduct -= deductNow;
+
+                    let otStart = ot.startDate || ot.date;
+                    let d = new Date(otStart);
+                    d.setMonth(d.getMonth() + 3);
+                    let expiryDate = d.toISOString().split('T')[0];
+
+                    leave.deductions.push({
+                        otId: ot.id,
+                        otDate: otStart,
+                        otExpiry: expiryDate,
+                        otReason: ot.reason,
+                        hours: deductNow,
+                        days: deductNow / 8
+                    });
+                }
+                leave.unmatchedHours = remainingToDeduct;
+            });
+        }
+
+        function saveDb() {
+            try {
+                recalculateFIFO();
+                localStorage.setItem('leave_system_db', JSON.stringify(db));
+                render();
+            } catch (err) {
+                alert('保存数据出错: ' + err.message);
+            }
+        }
+
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            const type = document.getElementById('entryType').value;
+            const startDate = document.getElementById('formStartDate').value;
+            const endDate = document.getElementById('formEndDate').value;
+            const sPeriod = document.getElementById('formStartPeriod') ? document.getElementById('formStartPeriod').value : 'full';
+            const ePeriod = document.getElementById('formEndPeriod') ? document.getElementById('formEndPeriod').value : 'full';
+            const reason = document.getElementById('formReason').value || (type === 'ot' ? '加班' : '调休');
+
+            const calc = calculateDaysAndHours(startDate, endDate, sPeriod, ePeriod);
+            if (calc.days <= 0) { alert('日期范围或时段选择有误！'); return; }
+
+            let conflict = checkConflict(type, startDate, endDate, sPeriod, ePeriod);
+            if (conflict) {
+                if (!confirm(`⚠️ 检测到 ${conflict.startDate} 至 ${conflict.endDate} 已存在记录 (${conflict.reason})，是否仍要重复添加？`)) return;
+            }
+
+            if (type === 'ot') {
+                db.overtimes.push({ id: 'OT_' + Date.now(), startDate, endDate, sPeriod, ePeriod, days: calc.days, hours: calc.hours, reason });
+            } else {
+                db.leaves.push({ id: 'LV_' + Date.now(), startDate, endDate, sPeriod, ePeriod, days: calc.days, hours: calc.hours, reason });
+            }
+
+            saveDb();
+            document.getElementById('formReason').value = '';
+            alert(type === 'ot' ? '加班登记成功！' : '调休登记成功，已按 FIFO 自动抵消！');
+        }
+
+        function deleteOt(id) {
+            if(!confirm('确定要删除这条加班记录吗？')) return;
+            db.overtimes = db.overtimes.filter(o => o.id !== id);
+            saveDb();
+        }
+
+        function deleteLeave(id) {
+            if(!confirm('确定要删除这条调休记录吗？')) return;
+            db.leaves = db.leaves.filter(l => l.id !== id);
+            saveDb();
+        }
+
+        function batchDelete() {
+            let checkboxes = document.querySelectorAll('.record-checkbox:checked');
+            if (checkboxes.length === 0) { alert('请先勾选需要删除的记录！'); return; }
+            if (!confirm(`确定要批量删除选中的 ${checkboxes.length} 条记录吗？`)) return;
+
+            let idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+            if (currentTab === 'leave') {
+                db.leaves = db.leaves.filter(l => !idsToDelete.includes(l.id));
+            } else {
+                db.overtimes = db.overtimes.filter(ot => !idsToDelete.includes(ot.id));
+            }
+            saveDb();
+            document.getElementById('selectAllCheckbox').checked = false;
+        }
+
+        function toggleSelectAll(master) {
+            let checkboxes = document.querySelectorAll('.record-checkbox');
+            checkboxes.forEach(cb => cb.checked = master.checked);
+        }
+
+        function toggleSortOrder() {
+            sortDesc = !sortDesc;
+            document.getElementById('sortOrderBtn').innerText = sortDesc ? '排序: 最近在上 ▼' : '排序: 最远在上 ▲';
+            render();
+        }
+
+        function smartBatchClear() {
+            if (!confirm('确定要执行清理吗？系统将从最早记录开始，成批清除已完全处理的加班、调休记录！')) return;
+            recalculateFIFO();
+            
+            let ots = [...db.overtimes].sort((a, b) => new Date(a.startDate || a.date) - new Date(b.startDate || b.date));
+            let leaves = [...db.leaves].sort((a, b) => new Date(a.startDate || a.date) - new Date(b.startDate || b.date));
+
+            let otIndex = 0, leaveIndex = 0, otSum = 0, leaveSum = 0;
+            let closedOtIds = new Set(), closedLeaveIds = new Set();
+            let currentBatchOtIds = [], currentBatchLeaveIds = [];
+
+            while (otIndex < ots.length || leaveIndex < leaves.length) {
+                if ((otSum <= leaveSum || leaveIndex >= leaves.length) && otIndex < ots.length) {
+                    otSum += ots[otIndex].hours;
+                    currentBatchOtIds.push(ots[otIndex].id);
+                    otIndex++;
+                } else if (leaveIndex < leaves.length) {
+                    leaveSum += leaves[leaveIndex].hours;
+                    currentBatchLeaveIds.push(leaves[leaveIndex].id);
+                    leaveIndex++;
+                } else {
+                    break;
+                }
+
+                if (otSum === leaveSum && otSum > 0) {
+                    currentBatchOtIds.forEach(id => closedOtIds.add(id));
+                    currentBatchLeaveIds.forEach(id => closedLeaveIds.add(id));
+                    currentBatchOtIds = [];
+                    currentBatchLeaveIds = [];
+                }
+            }
+
+            if (closedOtIds.size === 0 && closedLeaveIds.size === 0) {
+                alert('当前没有达成清理条件的记录，所有记录已完整保留！');
+                return;
+            }
+
+            db.overtimes = db.overtimes.filter(ot => !closedOtIds.has(ot.id));
+            db.leaves = db.leaves.filter(l => !closedLeaveIds.has(l.id));
+            saveDb();
+            alert(`清理记录完成！已成功清理 ${closedOtIds.size} 笔加班与 ${closedLeaveIds.size} 笔调休闭环记录。`);
+        }
+
+        function openEditModal(type, id) {
+            const modal = document.getElementById('editModal');
+            document.getElementById('editType').value = type;
+            document.getElementById('editId').value = id;
+
+            let item = (type === 'ot') ? db.overtimes.find(o => o.id === id) : db.leaves.find(l => l.id === id);
+            if (item) {
+                document.getElementById('editModalTitle').innerText = type === 'ot' ? '修改加班记录' : '修改调休记录';
+                document.getElementById('editStartDate').value = item.startDate || item.date;
+                document.getElementById('editEndDate').value = item.endDate || item.date;
+                document.getElementById('editReason').value = item.reason;
+                updateCalc('edit');
+            }
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.remove('flex');
+            document.getElementById('editModal').classList.add('hidden');
+        }
+
+        function saveEdit(e) {
+            e.preventDefault();
+            const type = document.getElementById('editType').value;
+            const id = document.getElementById('editId').value;
+            const startDate = document.getElementById('editStartDate').value;
+            const endDate = document.getElementById('editEndDate').value;
+            const sPeriod = document.getElementById('editStartPeriod') ? document.getElementById('editStartPeriod').value : 'full';
+            const ePeriod = document.getElementById('editEndPeriod') ? document.getElementById('editEndPeriod').value : 'full';
+            const reason = document.getElementById('editReason').value;
+
+            const calc = calculateDaysAndHours(startDate, endDate, sPeriod, ePeriod);
+            let item = (type === 'ot') ? db.overtimes.find(o => o.id === id) : db.leaves.find(l => l.id === id);
+            if (item) {
+                item.startDate = startDate; item.endDate = endDate;
+                item.sPeriod = sPeriod; item.ePeriod = ePeriod;
+                item.days = calc.days; item.hours = calc.hours;
+                item.reason = reason;
+            }
+
+            closeEditModal();
+            saveDb();
+            alert('修改成功！');
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('tabLeaveBtn').className = tab === 'leave' ? 'pb-2 border-b-2 border-indigo-600 text-indigo-600 transition' : 'pb-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition';
+            document.getElementById('tabOtBtn').className = tab === 'ot' ? 'pb-2 border-b-2 border-indigo-600 text-indigo-600 transition' : 'pb-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 transition';
+            document.getElementById('selectAllCheckbox').checked = false;
+            render();
+        }
+
+        function resetFilter() {
+            document.getElementById('filterStart').value = '';
+            document.getElementById('filterEnd').value = '';
+            render();
+        }
+
+        // 针对 Koder / iOS 本地服务器专门优化的导出方法
+        function exportData() {
+            const dataStr = JSON.stringify(db, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8;' });
+            const filename = `leave_backup_${new Date().toISOString().split('T')[0]}.json`;
+
+            // 尝试通过虚拟 Blob URL 触发下载
+            try {
+                const url = URL.createObjectURL(blob);
+                const dlAnchor = document.createElement('a');
+                dlAnchor.href = url;
+                dlAnchor.download = filename;
+                dlAnchor.style.display = 'none';
+                document.body.appendChild(dlAnchor);
+                dlAnchor.click();
+                
+                setTimeout(() => {
+                    document.body.removeChild(dlAnchor);
+                    URL.revokeObjectURL(url);
+                }, 200);
+            } catch (err) {
+                console.warn('Direct download blocked, opening fallback modal');
+            }
+
+            // 同时打开文本面板，确保在 Koder 严苛沙盒下用户一键复制即能备份
+            const modal = document.getElementById('exportModal');
+            const textarea = document.getElementById('exportTextarea');
+            if (modal && textarea) {
+                textarea.value = dataStr;
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            }
+        }
+
+        function closeExportModal() {
+            const modal = document.getElementById('exportModal');
+            if (modal) {
+                modal.classList.remove('flex');
+                modal.classList.add('hidden');
+            }
+        }
+
+        function copyExportText() {
+            const textarea = document.getElementById('exportTextarea');
+            if (textarea) {
+                textarea.select();
+                textarea.setSelectionRange(0, 99999);
+                try {
+                    navigator.clipboard.writeText(textarea.value).then(() => {
+                        alert('备份 JSON 文本已成功复制到剪贴板！可前往文件 App 粘贴保存。');
+                    }).catch(() => {
+                        document.execCommand('copy');
+                        alert('备份 JSON 文本已复制！');
+                    });
+                } catch (e) {
+                    alert('请手动长按文本框全选并复制。');
+                }
+            }
+        }
+
+        // 热力图渲染
+        function renderHeatmap() {
+            const container = document.getElementById('heatmapContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            const today = new Date();
+            const daysToDisplay = 364;
+            const startDate = new Date();
+            startDate.setDate(today.getDate() - daysToDisplay);
+
+            // 将 startDate 调整为当周的“周一”（JS 中 getDay(): 0是周日, 1是周一...6是周六）
+            let startDayOfWeek = startDate.getDay();
+            let diffToMonday = startDayOfWeek === 0 ? -6 : 1 - startDayOfWeek;
+            startDate.setDate(startDate.getDate() + diffToMonday);
+
+            let dateMap = {};
+            if (db.overtimes) {
+                db.overtimes.forEach(ot => {
+                    let d = ot.startDate || ot.date;
+                    if (!d) return;
+                    if (!dateMap[d]) dateMap[d] = { otDays: 0, leaveDays: 0, ots: [], leaves: [] };
+                    dateMap[d].otDays += ot.days;
+                    dateMap[d].ots.push(ot);
+                });
+            }
+            if (db.leaves) {
+                db.leaves.forEach(l => {
+                    let d = l.startDate || l.date;
+                    if (!d) return;
+                    if (!dateMap[d]) dateMap[d] = { otDays: 0, leaveDays: 0, ots: [], leaves: [] };
+                    dateMap[d].leaveDays += l.days;
+                    dateMap[d].leaves.push(l);
+                });
+            }
+
+            let currentColumn = document.createElement('div');
+            currentColumn.className = "flex flex-col gap-1 shrink-0";
+            let dayCounterInCol = 0;
+
+            let totalDaysSpan = Math.round((today - startDate) / (1000 * 60 * 60 * 24));
+
+            for (let i = 0; i <= totalDaysSpan; i++) {
+                let loopDate = new Date(startDate);
+                loopDate.setDate(startDate.getDate() + i);
+                let dateStr = loopDate.toISOString().split('T')[0];
+
+                let cellData = dateMap[dateStr];
+                let bgClass = "bg-slate-100 hover:ring-1 hover:ring-slate-300";
+
+                if (cellData) {
+                    if (cellData.leaveDays > 0) bgClass = "bg-purple-500 hover:ring-2 hover:ring-purple-300";
+                    else if (cellData.otDays >= 1.0) bgClass = "bg-emerald-600 hover:ring-2 hover:ring-emerald-300";
+                    else if (cellData.otDays > 0) bgClass = "bg-emerald-300 hover:ring-2 hover:ring-emerald-300";
+                }
+
+                let square = document.createElement('div');
+                square.className = `w-3 h-3 rounded-sm cursor-pointer transition ${bgClass}`;
+                square.title = `${dateStr}`;
+                square.onclick = () => showHeatmapDetail(dateStr, cellData);
+
+                currentColumn.appendChild(square);
+                dayCounterInCol++;
+
+                // 每满 7 天（周一到周日）换一列
+                if (dayCounterInCol === 7 || i === totalDaysSpan) {
+                    container.appendChild(currentColumn);
+                    currentColumn = document.createElement('div');
+                    currentColumn.className = "flex flex-col gap-1 shrink-0";
+                    dayCounterInCol = 0;
+                }
+            }
+
+            setTimeout(() => { if (container) container.scrollLeft = container.scrollWidth; }, 100);
+        }
+
+        function showHeatmapDetail(dateStr, data) {
+            const detailBox = document.getElementById('heatmapDetail');
+            if (!detailBox) return;
+            detailBox.classList.remove('hidden');
+
+            if (!data || (data.ots.length === 0 && data.leaves.length === 0)) {
+                detailBox.innerHTML = `<span>📅 <b>${dateStr}</b>：无加班与调休记录。</span>`;
+                return;
+            }
+
+            let html = `<div>📅 <b>${dateStr} 考勤详情：</b></div><div class="mt-1 space-y-1">`;
+            if (data.ots.length > 0) {
+                data.ots.forEach(ot => {
+                    html += `<div class="text-emerald-700">🟢 加班 ${ot.days} 天 (${ot.reason})</div>`;
+                });
+            }
+            if (data.leaves.length > 0) {
+                data.leaves.forEach(l => {
+                    html += `<div class="text-purple-700">🟣 调休 ${l.days} 天 (${l.reason})</div>`;
+                });
+            }
+            html += `</div>`;
+            detailBox.innerHTML = html;
+        }
+
+        function render() {
+            const today = new Date().toISOString().split('T')[0];
+
+            let totalBalanceHours = 0;
+            if (db.overtimes) {
+                db.overtimes.forEach(ot => {
+                    let remHours = ot.hours - (ot.usedHours || 0);
+                    if (remHours > 0) totalBalanceHours += remHours;
+                });
+            }
+
+            const currentYear = new Date().getFullYear().toString();
+            let yearOtHours = 0;
+            if (db.overtimes) {
+                db.overtimes.forEach(ot => {
+                    let sDate = ot.startDate || ot.date;
+                    if (sDate && sDate.startsWith(currentYear)) {
+                        yearOtHours += ot.hours;
+                    }
+                });
+            }
+
+            let totalLeaveHours = 0;
+            if (db.leaves) {
+                db.leaves.forEach(l => totalLeaveHours += l.hours);
+            }
+
+            let sortedOts = db.overtimes ? [...db.overtimes].sort((a,b) => new Date(b.startDate || b.date) - new Date(a.startDate || a.date)) : [];
+            let sortedLeaves = db.leaves ? [...db.leaves].sort((a,b) => new Date(b.startDate || b.date) - new Date(a.startDate || a.date)) : [];
+
+            const setSafeText = (id, html) => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = html;
+            };
+
+            setSafeText('totalBalance', `${(totalBalanceHours / 8).toFixed(1)} <span class="text-xs font-normal">天 (${totalBalanceHours}h)</span>`);
+            setSafeText('yearOtTotal', `${(yearOtHours / 8).toFixed(1)} 天`);
+            setSafeText('totalLeaveUsed', `${(totalLeaveHours / 8).toFixed(1)} 天`);
+            setSafeText('lastOtText', sortedOts.length > 0 ? `${sortedOts[0].startDate} (${sortedOts[0].days}天)` : "无记录");
+            setSafeText('lastLeaveText', sortedLeaves.length > 0 ? `${sortedLeaves[0].startDate} (${sortedLeaves[0].days}天)` : "无记录");
+
+            let validOts = (db.overtimes || [])
+                .map(ot => {
+                    let otStart = ot.startDate || ot.date;
+                    let d = new Date(otStart);
+                    d.setMonth(d.getMonth() + 3);
+                    return { ...ot, expiryDate: d.toISOString().split('T')[0], remDays: (ot.hours - (ot.usedHours || 0)) / 8 };
+                })
+                .filter(ot => {
+                    let daysLeft = Math.ceil((new Date(ot.expiryDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+                    return daysLeft >= 0 && daysLeft <= 31 && ot.remDays > 0;
+                })
+                .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+
+            const expiryCard = document.getElementById('expiryWarningCard');
+            const expiryText = document.getElementById('earliestExpiryText');
+            if (expiryCard && expiryText) {
+                if (validOts.length > 0) {
+                    let topOts = validOts.slice(0, 3);// 取最近3条
+                    let listHtml = topOts.map(ot => `<div>⚠️ ${ot.startDate} 加班剩 <b class="text-rose-600">${ot.remDays}天</b> (${ot.expiryDate}到期)</div>`).join('');
+                    expiryText.innerHTML = `<div class="font-semibold text-rose-900 mb-0.5">近期到期加班提醒 (31天内)：</div><div class="space-y-0.5">${listHtml}</div>`;
+                    expiryCard.className = "bg-rose-50 p-3.5 rounded-xl border border-rose-200 flex flex-col gap-1";
+                } else {
+                    expiryText.innerText = "✨ 无 31 天内到期的加班风险";
+                    expiryCard.className = "bg-emerald-50 p-3.5 rounded-xl border border-emerald-100 flex flex-col gap-1 text-emerald-800";
+                }
+            }
+
+            renderHeatmap();
+
+            const startFilterEl = document.getElementById('filterStart');
+            const endFilterEl = document.getElementById('filterEnd');
+            const startFilter = startFilterEl ? startFilterEl.value : '';
+            const endFilter = endFilterEl ? endFilterEl.value : '';
+            const listContainer = document.getElementById('recordList');
+            if (!listContainer) return;
+            listContainer.innerHTML = '';
+
+            const sortFn = (a, b) => {
+                let dateA = new Date(a.startDate || a.date);
+                let dateB = new Date(b.startDate || b.date);
+                return sortDesc ? dateB - dateA : dateA - dateB;
+            };
+
+            if (currentTab === 'leave') {
+                let filteredLeaves = (db.leaves || []).filter(l => {
+                    let sDate = l.startDate || l.date;
+                    if (startFilter && sDate < startFilter) return false;
+                    if (endFilter && sDate > endFilter) return false;
+                    return true;
+                }).sort(sortFn);
+
+                if (filteredLeaves.length === 0) {
+                    listContainer.innerHTML = `<div class="py-8 text-center text-sm text-slate-400">暂无调休记录</div>`;
+                    return;
+                }
+
+                filteredLeaves.forEach(l => {
+                    let deductionsHtml = (l.deductions || []).map(d => 
+                        `<span class="inline-block bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded-md mr-1 mt-1">
+                            🔗 抵消 [${d.otDate} 加班] <b>${d.days}天</b> (${d.otReason})
+                         </span>`
+                    ).join('');
+
+                    if (l.unmatchedHours > 0) {
+                        deductionsHtml += `<span class="inline-block bg-rose-50 text-rose-600 text-xs px-2 py-0.5 rounded-md mr-1 mt-1">⚠️ 超出可用余额 ${(l.unmatchedHours/8).toFixed(1)}天</span>`;
+                    }
+
+                    let sDate = l.startDate || l.date;
+                    let eDate = l.endDate || l.date;
+                    let dateStr = sDate === eDate ? sDate : `${sDate} 至 ${eDate}`;
+
+                    let item = document.createElement('div');
+                    item.className = "py-4 flex items-center justify-between gap-3";
+                    item.innerHTML = `
+                        <div class="flex items-center gap-3 flex-1 min-w-0">
+                            <input type="checkbox" value="${l.id}" class="record-checkbox rounded border-slate-300">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-semibold text-slate-800">${dateStr} 调休 ${l.days} 天</span>
+                                    <span class="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full">${l.reason}</span>
+                                </div>
+                                <div class="mt-1 flex flex-wrap">${deductionsHtml}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button onclick="openEditModal('leave', '${l.id}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">修改</button>
+                            <button onclick="deleteLeave('${l.id}')" class="text-xs text-rose-500 hover:text-rose-700 font-medium">删除</button>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+
+            } else {
+                let filteredOts = (db.overtimes || []).filter(ot => {
+                    let otStart = ot.startDate || ot.date;
+                    if (startFilter && otStart < startFilter) return false;
+                    if (endFilter && otStart > endFilter) return false;
+                    return true;
+                }).sort(sortFn);
+
+                if (filteredOts.length === 0) {
+                    listContainer.innerHTML = `<div class="py-8 text-center text-sm text-slate-400">暂无加班记录</div>`;
+                    return;
+                }
+
+                filteredOts.forEach(ot => {
+                    let otStart = ot.startDate || ot.date;
+                    let d = new Date(otStart);
+                    d.setMonth(d.getMonth() + 3);
+                    let expiryDate = d.toISOString().split('T')[0];
+                    let remDays = (ot.hours - (ot.usedHours || 0)) / 8;
+                    let isExpired = expiryDate < today;
+
+                    let statusBadge = '';
+                    if (remDays === 0) statusBadge = `<span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">已耗尽</span>`;
+                    else if (isExpired) statusBadge = `<span class="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full">已过3个月(可用)</span>`;
+                    else statusBadge = `<span class="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full">有效 (剩 ${remDays}天)</span>`;
+
+                    let otEnd = ot.endDate || ot.date;
+                    let dateStr = otStart === otEnd ? otStart : `${otStart} 至 ${otEnd}`;
+
+                    let item = document.createElement('div');
+                    item.className = "py-4 flex items-center justify-between gap-3";
+                    item.innerHTML = `
+                        <div class="flex items-center gap-3 flex-1 min-w-0">
+                            <input type="checkbox" value="${ot.id}" class="record-checkbox rounded border-slate-300">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-semibold text-slate-800">${dateStr} 加班 ${ot.days} 天</span>
+                                    ${statusBadge}
+                                </div>
+                                <div class="text-xs text-slate-500 mt-1">
+                                    事由: ${ot.reason} | 到期日: ${expiryDate} | 已用: ${((ot.usedHours || 0)/8)}天
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button onclick="openEditModal('ot', '${ot.id}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">修改</button>
+                            <button onclick="deleteOt('${ot.id}')" class="text-xs text-rose-500 hover:text-rose-700 font-medium">删除</button>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+            }
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (imported.overtimes && imported.leaves) {
+                        db = imported;
+                        saveDb();
+                        alert('数据导入成功！');
+                    } else { alert('文件格式错误！'); }
+                } catch (err) { alert('解析 JSON 失败！'); }
+            };
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+</html>
